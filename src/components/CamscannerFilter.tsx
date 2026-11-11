@@ -2,8 +2,12 @@
 import { useEffect, useRef, useState } from "react";
 import cvModule from "@techstark/opencv-js";
 
-export type FilterMode = "original" | "magic" | "grayscale" | "bw";
-
+export type FilterMode =
+  | "original"
+  | "magic"
+  | "magic_gray"
+  | "grayscale"
+  | "bw";
 interface CamScannerFilterProps {
   image: string;
   onApply: (blob: Blob) => void;
@@ -146,7 +150,7 @@ export default function CamScannerFilter({
 
   const [cvReady, setCvReady] = useState(false);
   const [imgReady, setImgReady] = useState(false);
-  const [mode, setMode] = useState<FilterMode>("magic");
+  const [mode, setMode] = useState<FilterMode>("magic_gray");
   const [contrast, setContrast] = useState(1.25);
   const [threshold, setThreshold] = useState(185);
   const cvRef = useRef<any>(null); // <-- add this
@@ -211,7 +215,7 @@ export default function CamScannerFilter({
 
       if (mode === "original") {
         result = rgb;
-      } else if (mode === "magic") {
+      } else if (mode === "magic" || mode === "magic_gray") {
         // Color: normalize each channel, then boost contrast and sharpen
         const channels = track(new cv.MatVector());
         cv.split(rgb, channels);
@@ -226,11 +230,17 @@ export default function CamScannerFilter({
         const merged = track(new cv.Mat());
         cv.merge(normalized, merged);
 
-        // Push the near-white paper to pure white, deepen the ink
         const boosted = track(new cv.Mat());
         merged.convertTo(boosted, -1, contrast, -(contrast - 1) * 110);
         unsharp(cv, boosted, 0.6);
-        result = boosted;
+
+        if (mode === "magic_gray") {
+          const gray = track(new cv.Mat());
+          cv.cvtColor(boosted, gray, cv.COLOR_RGB2GRAY);
+          result = gray;
+        } else {
+          result = boosted;
+        }
       } else {
         // Grayscale-based modes
         const gray = track(new cv.Mat());
@@ -291,9 +301,12 @@ export default function CamScannerFilter({
           <option value='magic'>Magic Color</option>
           <option value='grayscale'>Grayscale</option>
           <option value='bw'>Black & White</option>
+          <option value='magic_gray'>Scan → Grayscale</option>
         </select>
 
-        {(mode === "magic" || mode === "grayscale") && (
+        {(mode === "magic" ||
+          mode === "magic_gray" ||
+          mode === "grayscale") && (
           <>
             <label>Contrast: {contrast.toFixed(2)}</label>
             <input

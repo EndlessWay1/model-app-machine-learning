@@ -11,6 +11,19 @@ import "./App.css";
 
 type Step = 0 | 1 | 2 | 3;
 
+const MODEL_CONFIGS = [
+  { key: "cnn", label: "CNN", url: "/cnn_model_web/model.json" },
+  {
+    key: "efficient",
+    label: "EfficientNet",
+    url: "/efficient_model_web/model.json",
+  },
+] as const;
+
+type ModelKey = (typeof MODEL_CONFIGS)[number]["key"];
+type Models = Partial<Record<ModelKey, tf.GraphModel>>;
+type Results = Partial<Record<ModelKey, PredictionResult[]>>;
+
 const steps = [
   { title: "Capture", description: "Take or upload an image" },
   { title: "Enhance", description: "Crop and apply filters" },
@@ -19,14 +32,16 @@ const steps = [
 ];
 
 function App() {
-  const [model, setModel] = useState<tf.GraphModel | null>(null);
+  const [models, setModels] = useState<Models>({});
   const [modelLoading, setModelLoading] = useState(true);
+  const loadedCount = Object.keys(models).length;
 
   const [captured, setCaptured] = useState<Blob | null>(null);
   const [processed, setProcessed] = useState<Blob | null>(null);
   const [resized, setResized] = useState<Blob | null>(null);
 
   const [preview, setPreview] = useState("");
+  const [processedPreview, setProcessedPreview] = useState("");
   const [resizedPreview, setResizedPreview] = useState("");
 
   const [classNames, setClassNames] = useState<string[]>([]);
@@ -34,7 +49,7 @@ function App() {
 
   const [step, setStep] = useState<Step>(0);
 
-  const [result, setResult] = useState<PredictionResult[] | null>(null);
+  const [results, setResults] = useState<Results | null>(null);
   const [predicting, setPredicting] = useState(false);
   const [resizing, setResizing] = useState(false);
 
@@ -72,40 +87,41 @@ function App() {
     };
   }, []);
 
-  // Load TensorFlow model
+  // Load TensorFlow models
   useEffect(() => {
     let mounted = true;
-    let loadedModel: tf.GraphModel | null = null;
+    const loaded: tf.GraphModel[] = [];
 
-    async function loadModel() {
-      try {
-        await tf.ready();
+    async function loadModels() {
+      await tf.ready();
 
-        loadedModel = await tf.loadGraphModel("/tfjs_model/model.json");
+      await Promise.all(
+        MODEL_CONFIGS.map(async ({ key, url, label }) => {
+          try {
+            const m = await tf.loadGraphModel(url);
 
-        if (!mounted) {
-          loadedModel.dispose();
-          return;
-        }
+            if (!mounted) {
+              m.dispose();
+              return;
+            }
 
-        setModel(loadedModel);
-        console.log("Model loaded successfully!");
-        console.log("Inputs:", loadedModel.inputs);
-        console.log("Outputs:", loadedModel.outputs);
-      } catch (error) {
-        console.error("Failed to load model:", error);
-      } finally {
-        if (mounted) {
-          setModelLoading(false);
-        }
-      }
+            loaded.push(m);
+            setModels((prev) => ({ ...prev, [key]: m }));
+            console.log(`${label} loaded`, m.inputs, m.outputs);
+          } catch (error) {
+            console.error(`Failed to load ${label}:`, error);
+          }
+        }),
+      );
+
+      if (mounted) setModelLoading(false);
     }
 
-    loadModel();
+    loadModels();
 
     return () => {
       mounted = false;
-      loadedModel?.dispose();
+      loaded.forEach((m) => m.dispose());
     };
   }, []);
 
@@ -122,6 +138,20 @@ function App() {
 
     return () => URL.revokeObjectURL(url);
   }, [captured]);
+
+  // Processed image preview
+  useEffect(() => {
+    if (!processed) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setProcessedPreview("");
+      return;
+    }
+
+    const url = URL.createObjectURL(processed);
+    setProcessedPreview(url);
+
+    return () => URL.revokeObjectURL(url);
+  }, [processed]);
 
   // Resized image preview
   useEffect(() => {
@@ -142,7 +172,7 @@ function App() {
     setCaptured(blob);
     setProcessed(null);
     setResized(null);
-    setResult(null);
+    setResults(null);
     setShowCropper(false);
     setStep(0);
   }
@@ -152,7 +182,7 @@ function App() {
     setCaptured(blob);
     setProcessed(null);
     setResized(null);
-    setResult(null);
+    setResults(null);
     setShowCropper(false);
   }
 
@@ -160,7 +190,7 @@ function App() {
   function handleApplyFilter(blob: Blob) {
     setProcessed(blob);
     setResized(null);
-    setResult(null);
+    setResults(null);
   }
 
   // Resize image
@@ -178,7 +208,7 @@ function App() {
       });
 
       setResized(resizedBlob);
-      setResult(null);
+      setResults(null);
     } catch (error) {
       console.error("Resize failed:", error);
     } finally {
@@ -186,14 +216,19 @@ function App() {
     }
   }
 
-  // Run prediction
+  // Run prediction on all loaded models
   async function handlePredict() {
-    if (!model || !resized || classNames.length !== 49 || predicting) {
+    if (
+      loadedCount === 0 ||
+      !resized ||
+      classNames.length !== 49 ||
+      predicting
+    ) {
       return;
     }
 
     setPredicting(true);
-    setResult(null);
+    setResults(null);
 
     let bitmap: ImageBitmap | null = null;
 
@@ -205,16 +240,25 @@ function App() {
       canvas.height = 224;
 
       const ctx = canvas.getContext("2d");
-
-      if (!ctx) {
-        throw new Error("Could not create canvas context.");
-      }
+      if (!ctx) throw new Error("Could not create canvas context.");
 
       ctx.drawImage(bitmap, 0, 0, 224, 224);
 
-      const prediction = await predictImage(model, canvas, classNames);
+      const output: Results = {};
 
-      setResult(prediction);
+      // Sequential to keep GPU/WebGL memory usage low
+      for (const { key, label } of MODEL_CONFIGS) {
+        const m = models[key];
+        if (!m) continue;
+
+        try {
+          output[key] = await predictImage(m, canvas, classNames);
+        } catch (error) {
+          console.error(`${label} prediction error:`, error);
+        }
+      }
+
+      setResults(output);
     } catch (error) {
       console.error("Prediction error:", error);
     } finally {
@@ -228,7 +272,7 @@ function App() {
     Boolean(captured),
     Boolean(processed),
     Boolean(resized),
-    Boolean(result),
+    Boolean(results),
   ][step];
 
   function nextStep() {
@@ -247,7 +291,7 @@ function App() {
     setCaptured(null);
     setProcessed(null);
     setResized(null);
-    setResult(null);
+    setResults(null);
     setShowCropper(false);
     setStep(0);
   }
@@ -263,12 +307,14 @@ function App() {
         </div>
 
         <div className='model-status'>
-          <span className={`status-dot ${model ? "online" : ""}`} />
+          <span className={`status-dot ${loadedCount > 0 ? "online" : ""}`} />
           {modelLoading
-            ? "Loading AI model..."
-            : model
-              ? "AI Model Ready"
-              : "Model Unavailable"}
+            ? "Loading AI models..."
+            : loadedCount === MODEL_CONFIGS.length
+              ? "AI Models Ready"
+              : loadedCount > 0
+                ? `${loadedCount}/${MODEL_CONFIGS.length} Models Ready`
+                : "Models Unavailable"}
         </div>
       </header>
 
@@ -422,15 +468,12 @@ function App() {
                   </div>
                 </div>
 
-                {processed && (
+                {processedPreview && (
                   <div className='resize-preview'>
                     <div className='preview-heading'>
                       <strong>Processed image</strong>
                     </div>
-                    <img
-                      src={URL.createObjectURL(processed)}
-                      alt='Processed image'
-                    />
+                    <img src={processedPreview} alt='Processed image' />
                   </div>
                 )}
 
@@ -470,7 +513,7 @@ function App() {
                 <div className='content-intro'>
                   <h3>Analyze your image</h3>
                   <p>
-                    Your image is ready. Let the AI model identify the most
+                    Your image is ready. Let both AI models identify the most
                     likely classes.
                   </p>
                 </div>
@@ -490,7 +533,7 @@ function App() {
                   className='primary-button analyze-button'
                   onClick={handlePredict}
                   disabled={
-                    !model ||
+                    loadedCount === 0 ||
                     modelLoading ||
                     predicting ||
                     classNames.length !== 49
@@ -498,11 +541,11 @@ function App() {
                 >
                   {predicting
                     ? "Analyzing image..."
-                    : !model
-                      ? "AI model unavailable"
+                    : loadedCount === 0
+                      ? "AI models unavailable"
                       : classNames.length !== 49
                         ? "Loading class names..."
-                        : "✦  Analyze image"}
+                        : "✦  Analyze with both models"}
                 </button>
 
                 {predicting && (
@@ -512,43 +555,63 @@ function App() {
                   </div>
                 )}
 
-                {result && (
+                {results && (
                   <div className='results-container'>
                     <div className='results-heading'>
                       <span className='eyebrow'>CLASSIFICATION COMPLETE</span>
                       <h3>Top 5 Predictions</h3>
-                      <p>Most likely classes identified by the model.</p>
+                      <p>Most likely classes identified by each model.</p>
                     </div>
 
-                    {result.slice(0, 5).map((prediction, index) => (
-                      <div
-                        className={`prediction-item ${
-                          index === 0 ? "top-prediction" : ""
-                        }`}
-                        key={prediction.classIndex}
-                      >
-                        <div className='prediction-rank'>{index + 1}</div>
+                    <div className='results-grid'>
+                      {MODEL_CONFIGS.map(({ key, label }) => {
+                        const preds = results[key];
 
-                        <div className='prediction-details'>
-                          <div className='prediction-name'>
-                            <strong>{prediction.className}</strong>
-                            <span>{(prediction.score * 100).toFixed(2)}%</span>
-                          </div>
+                        return (
+                          <div className='model-results' key={key}>
+                            <h4 className='model-results-title'>{label}</h4>
 
-                          <div className='prediction-bar'>
-                            <div
-                              className='prediction-fill'
-                              style={{
-                                width: `${Math.min(
-                                  100,
-                                  Math.max(0, prediction.score * 100),
-                                )}%`,
-                              }}
-                            />
+                            {!preds ? (
+                              <p>Model unavailable.</p>
+                            ) : (
+                              preds.slice(0, 5).map((prediction, index) => (
+                                <div
+                                  className={`prediction-item ${
+                                    index === 0 ? "top-prediction" : ""
+                                  }`}
+                                  key={prediction.classIndex}
+                                >
+                                  <div className='prediction-rank'>
+                                    {index + 1}
+                                  </div>
+
+                                  <div className='prediction-details'>
+                                    <div className='prediction-name'>
+                                      <strong>{prediction.className}</strong>
+                                      <span>
+                                        {(prediction.score * 100).toFixed(2)}%
+                                      </span>
+                                    </div>
+
+                                    <div className='prediction-bar'>
+                                      <div
+                                        className='prediction-fill'
+                                        style={{
+                                          width: `${Math.min(
+                                            100,
+                                            Math.max(0, prediction.score * 100),
+                                          )}%`,
+                                        }}
+                                      />
+                                    </div>
+                                  </div>
+                                </div>
+                              ))
+                            )}
                           </div>
-                        </div>
-                      </div>
-                    ))}
+                        );
+                      })}
+                    </div>
 
                     <button
                       className='secondary-button restart-button'

@@ -15,13 +15,14 @@ export async function predictImage(
     throw new Error(`Expected 49 classes, received ${classNames.length}`);
   }
 
+  const channels = model.inputs[0].shape?.[3] ?? 3; // [null, 224, 224, C]
+
   const input = tf.tidy(() =>
     tf.browser
-      .fromPixels(image)
+      .fromPixels(image, channels)
       .resizeBilinear([224, 224])
-      .toFloat()
-      .div(255)
-      .expandDims(0),
+      .expandDims(0)
+      .toFloat(),
   );
 
   try {
