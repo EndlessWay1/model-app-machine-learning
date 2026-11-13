@@ -15,7 +15,7 @@ export async function predictImage(
     throw new Error(`Expected 49 classes, received ${classNames.length}`);
   }
 
-  const channels = model.inputs[0].shape?.[3] ?? 3; // [null, 224, 224, C]
+  const channels = model.inputs[0].shape?.[3] ?? 3;
 
   const input = tf.tidy(() =>
     tf.browser

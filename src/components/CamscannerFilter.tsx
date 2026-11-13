@@ -1,6 +1,8 @@
+/* eslint-disable react-hooks/refs */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useEffect, useRef, useState } from "react";
 import cvModule from "@techstark/opencv-js";
+import "./CamScannerFilter.css";
 
 export type FilterMode =
   | "original"
@@ -281,62 +283,222 @@ export default function CamScannerFilter({
   }
 
   return (
-    <div className='scanner-filter'>
-      <h2>Image Filter Preview</h2>
+    <section className='scanner-filter'>
+      {/* Header */}
+      <header className='scanner-header'>
+        <div>
+          <span className='scanner-eyebrow'>IMAGE EDITOR</span>
+          <h2>Enhance your document</h2>
+          <p>Adjust your image to get a clean, readable scan.</p>
+        </div>
 
-      {!cvReady && <p>Loading image engine…</p>}
-
-      <canvas
-        ref={canvasRef}
-        style={{ display: "block", width: "100%", height: "auto" }}
-      />
-
-      <div className='filter-controls'>
-        <label>Filter</label>
-        <select
-          value={mode}
-          onChange={(e) => setMode(e.target.value as FilterMode)}
+        <span
+          className={`scanner-status ${cvReady && imgReady ? "ready" : ""}`}
         >
-          <option value='original'>Original</option>
-          <option value='magic'>Magic Color</option>
-          <option value='grayscale'>Grayscale</option>
-          <option value='bw'>Black & White</option>
-          <option value='magic_gray'>Scan → Grayscale</option>
-        </select>
+          <span className='status-dot' />
+          {cvReady && imgReady ? "Ready to edit" : "Preparing scanner..."}
+        </span>
+      </header>
 
-        {(mode === "magic" ||
-          mode === "magic_gray" ||
-          mode === "grayscale") && (
-          <>
-            <label>Contrast: {contrast.toFixed(2)}</label>
-            <input
-              type='range'
-              min='1'
-              max='2'
-              step='0.05'
-              value={contrast}
-              onChange={(e) => setContrast(Number(e.target.value))}
-            />
-          </>
-        )}
+      {/* Image preview */}
+      <div className='scanner-preview'>
+        <div className='preview-toolbar'>
+          <span>
+            <span className='preview-icon'>▧</span>
+            Preview
+          </span>
+          <span className='preview-resolution'>
+            {sourceRef.current
+              ? `${sourceRef.current.width} × ${sourceRef.current.height}`
+              : "Loading image"}
+          </span>
+        </div>
 
-        {mode === "bw" && (
-          <>
-            <label>Threshold: {threshold}</label>
-            <input
-              type='range'
-              min='100'
-              max='240'
-              value={threshold}
-              onChange={(e) => setThreshold(Number(e.target.value))}
-            />
-          </>
-        )}
+        <div className='preview-image'>
+          {!cvReady || !imgReady ? (
+            <div className='preview-loading'>
+              <span className='loading-spinner' />
+              <strong>Preparing your image</strong>
+              <p>Initializing image processing engine...</p>
+            </div>
+          ) : null}
 
-        <button onClick={applyFilter} disabled={!cvReady}>
-          Apply Filter
-        </button>
+          <canvas
+            ref={canvasRef}
+            className='scanner-canvas'
+            style={{
+              display: cvReady && imgReady ? "block" : "none",
+            }}
+          />
+        </div>
+
+        <div className='preview-footer'>
+          <span>LIVE PREVIEW</span>
+          <span>Changes are applied automatically</span>
+        </div>
       </div>
-    </div>
+
+      {/* Filter selection */}
+      <div className='scanner-section'>
+        <div className='section-heading'>
+          <div>
+            <h3>Choose a filter</h3>
+            <p>Select the appearance that works best for your document.</p>
+          </div>
+          <span className='section-count'>05 FILTERS</span>
+        </div>
+
+        <div className='filter-grid'>
+          {[
+            {
+              id: "original",
+              icon: "◉",
+              title: "Original",
+              description: "No adjustments",
+            },
+            {
+              id: "magic",
+              icon: "✦",
+              title: "Magic Color",
+              description: "Enhance colors",
+            },
+            {
+              id: "magic_gray",
+              icon: "◐",
+              title: "Magic Gray",
+              description: "Clean grayscale",
+            },
+            {
+              id: "grayscale",
+              icon: "◑",
+              title: "Grayscale",
+              description: "Natural gray tones",
+            },
+            {
+              id: "bw",
+              icon: "◧",
+              title: "Black & White",
+              description: "High contrast scan",
+            },
+          ].map((filter) => (
+            <button
+              key={filter.id}
+              type='button'
+              className={`filter-card ${mode === filter.id ? "active" : ""}`}
+              onClick={() => setMode(filter.id as FilterMode)}
+              aria-pressed={mode === filter.id}
+            >
+              <span className='filter-icon'>{filter.icon}</span>
+              <span className='filter-name'>{filter.title}</span>
+              <span className='filter-description'>{filter.description}</span>
+              {mode === filter.id && <span className='filter-check'>✓</span>}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Adjustment panel */}
+      {(mode === "magic" ||
+        mode === "magic_gray" ||
+        mode === "grayscale" ||
+        mode === "bw") && (
+        <div className='scanner-section adjustment-panel'>
+          <div className='section-heading'>
+            <div>
+              <h3>Fine adjustments</h3>
+              <p>Fine-tune your scan to achieve the desired result.</p>
+            </div>
+            <button
+              type='button'
+              className='reset-button'
+              onClick={() => {
+                setContrast(1.25);
+                setThreshold(185);
+              }}
+            >
+              ↺ Reset
+            </button>
+          </div>
+
+          {mode !== "bw" ? (
+            <div className='adjustment-control'>
+              <div className='adjustment-label'>
+                <label htmlFor='scanner-contrast'>Contrast</label>
+                <output>{contrast.toFixed(2)}×</output>
+              </div>
+
+              <input
+                id='scanner-contrast'
+                className='scanner-range'
+                type='range'
+                min='1'
+                max='2'
+                step='0.05'
+                value={contrast}
+                onChange={(e) => setContrast(Number(e.target.value))}
+                style={
+                  {
+                    "--range-progress": `${((contrast - 1) / 1) * 100}%`,
+                  } as React.CSSProperties
+                }
+              />
+
+              <div className='range-labels'>
+                <span>Low</span>
+                <span>High</span>
+              </div>
+            </div>
+          ) : (
+            <div className='adjustment-control'>
+              <div className='adjustment-label'>
+                <label htmlFor='scanner-threshold'>Threshold</label>
+                <output>{threshold}</output>
+              </div>
+
+              <input
+                id='scanner-threshold'
+                className='scanner-range'
+                type='range'
+                min='100'
+                max='240'
+                value={threshold}
+                onChange={(e) => setThreshold(Number(e.target.value))}
+                style={
+                  {
+                    "--range-progress": `${((threshold - 100) / 140) * 100}%`,
+                  } as React.CSSProperties
+                }
+              />
+
+              <div className='range-labels'>
+                <span>Darker</span>
+                <span>Lighter</span>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Footer actions */}
+      <footer className='scanner-actions'>
+        <div className='action-description'>
+          <span className='action-check'>✓</span>
+          <span>
+            <strong>Ready to apply?</strong>
+            <small>Your original image remains unchanged.</small>
+          </span>
+        </div>
+
+        <button
+          type='button'
+          className='apply-button'
+          onClick={applyFilter}
+          disabled={!cvReady || !imgReady}
+        >
+          Apply Filter
+          <span>→</span>
+        </button>
+      </footer>
+    </section>
   );
 }

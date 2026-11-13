@@ -300,18 +300,17 @@ function App() {
     <main className='scanner-app'>
       <header className='app-header'>
         <div className='brand'>
-          <div className='brand-icon'>✦</div>
           <span>
-            Vision<span className='brand-accent'>AI</span>
+            Machine<span className='brand-accent'> Learning</span>
           </span>
         </div>
 
         <div className='model-status'>
           <span className={`status-dot ${loadedCount > 0 ? "online" : ""}`} />
           {modelLoading
-            ? "Loading AI models..."
+            ? "Loading Deep Learning models..."
             : loadedCount === MODEL_CONFIGS.length
-              ? "AI Models Ready"
+              ? "Models Ready"
               : loadedCount > 0
                 ? `${loadedCount}/${MODEL_CONFIGS.length} Models Ready`
                 : "Models Unavailable"}

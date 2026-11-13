@@ -114,6 +114,7 @@ button:disabled {
   font-size: clamp(30px, 5vw, 42px);
   margin: 12px 0;
   letter-spacing: -1.8px;
+  color: #16996f;
 }
 
 .wizard-heading p {
@@ -272,8 +273,51 @@ button:disabled {
 
 .camera-container {
   width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
 }
 
+.camera {
+  width: 100%;
+  max-width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+
+.camera-preview {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  background: #17172c;
+  border-radius: 13px;
+}
+
+.camera-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.camera-controls button {
+  flex: 1;
+  min-width: 120px;
+}
+
+/* Mobile */
+@media (max-width: 650px) {
+  .camera-preview {
+    aspect-ratio: 4 / 3;
+  }
+
+  .camera-controls button {
+    min-width: 0;
+  }
+}
 .image-preview-card,
 .resize-preview {
   margin-top: 25px;
