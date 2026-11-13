@@ -141,67 +141,31 @@ function unsharp(cv: any, mat: any, amount = 0.6) {
   blur.delete();
 }
 
-/* ---------- Component ---------- */
+/* ---------- Filter pipeline (shared by preview + final apply) ---------- */
 
-export default function CamScannerFilter({
-  image,
-  onApply,
-}: CamScannerFilterProps) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const sourceRef = useRef<HTMLCanvasElement | null>(null);
+const PREVIEW_MAX = 720; // fast live preview
+const APPLY_MAX = 1600; // final output (model input is only 224px)
 
-  const [cvReady, setCvReady] = useState(false);
-  const [imgReady, setImgReady] = useState(false);
-  const [mode, setMode] = useState<FilterMode>("magic_gray");
-  const [contrast, setContrast] = useState(1.25);
-  const [threshold, setThreshold] = useState(185);
-  const cvRef = useRef<any>(null); // <-- add this
+function scaleCanvas(src: HTMLCanvasElement, max: number) {
+  const k = Math.min(1, max / Math.max(src.width, src.height));
+  if (k === 1) return src;
+  const c = document.createElement("canvas");
+  c.width = Math.round(src.width * k);
+  c.height = Math.round(src.height * k);
+  const ctx = c.getContext("2d")!;
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(src, 0, 0, c.width, c.height);
+  return c;
+}
 
-  // Load OpenCV
-  useEffect(() => {
-    let alive = true;
-    loadCv()
-      .then(({ cv }) => {
-        if (!alive) return;
-        cvRef.current = cv;
-        setCvReady(true);
-      })
-      .catch((err) => console.error(err));
-    return () => {
-      alive = false;
-    };
-  }, []);
-
-  // Load image into an offscreen source canvas
-  useEffect(() => {
-    if (!image) return;
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setImgReady(false);
-    const img = new Image();
-    img.onload = () => {
-      const src = document.createElement("canvas");
-      src.width = img.naturalWidth;
-      src.height = img.naturalHeight;
-      src.getContext("2d")!.drawImage(img, 0, 0);
-      sourceRef.current = src;
-      setImgReady(true);
-    };
-    img.onerror = () => console.error("Failed to load filter image:", image);
-    img.src = image;
-    return () => {
-      img.onload = null;
-      img.onerror = null;
-    };
-  }, [image]);
-
-  // Run the filter
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    const source = sourceRef.current;
-    const cv = cvRef.current; // <-- not cvModule
-
-    if (!cvReady || !imgReady || !canvas || !source || !cv) return;
-
+function runFilter(
+  cv: any,
+  source: HTMLCanvasElement,
+  canvas: HTMLCanvasElement,
+  mode: FilterMode,
+  contrast: number,
+  threshold: number,
+) {
     const mats: any[] = [];
     const track = <T,>(m: T): T => {
       mats.push(m);
@@ -274,12 +238,87 @@ export default function CamScannerFilter({
         }
       });
     }
+}
+
+/* ---------- Component ---------- */
+
+export default function CamScannerFilter({
+  image,
+  onApply,
+}: CamScannerFilterProps) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const sourceRef = useRef<HTMLCanvasElement | null>(null);
+  const previewSrcRef = useRef<HTMLCanvasElement | null>(null);
+
+  const [cvReady, setCvReady] = useState(false);
+  const [imgReady, setImgReady] = useState(false);
+  const [mode, setMode] = useState<FilterMode>("magic_gray");
+  const [contrast, setContrast] = useState(1.25);
+  const [threshold, setThreshold] = useState(185);
+  const cvRef = useRef<any>(null); // <-- add this
+
+  // Load OpenCV
+  useEffect(() => {
+    let alive = true;
+    loadCv()
+      .then(({ cv }) => {
+        if (!alive) return;
+        cvRef.current = cv;
+        setCvReady(true);
+      })
+      .catch((err) => console.error(err));
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  // Load image into an offscreen source canvas
+  useEffect(() => {
+    if (!image) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setImgReady(false);
+    const img = new Image();
+    img.onload = () => {
+      const src = document.createElement("canvas");
+      src.width = img.naturalWidth;
+      src.height = img.naturalHeight;
+      src.getContext("2d")!.drawImage(img, 0, 0);
+      sourceRef.current = src;
+      previewSrcRef.current = scaleCanvas(src, PREVIEW_MAX);
+      setImgReady(true);
+    };
+    img.onerror = () => console.error("Failed to load filter image:", image);
+    img.src = image;
+    return () => {
+      img.onload = null;
+      img.onerror = null;
+    };
+  }, [image]);
+
+  // Run the filter on the small preview (debounced so sliders stay smooth)
+  useEffect(() => {
+    if (!cvReady || !imgReady) return;
+
+    const t = setTimeout(() => {
+      const canvas = canvasRef.current;
+      const source = previewSrcRef.current;
+      const cv = cvRef.current;
+      if (canvas && source && cv) {
+        runFilter(cv, source, canvas, mode, contrast, threshold);
+      }
+    }, 80);
+
+    return () => clearTimeout(t);
   }, [cvReady, imgReady, mode, contrast, threshold]);
 
   function applyFilter() {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    canvas.toBlob((blob) => blob && onApply(blob), "image/jpeg", 0.95);
+    const cv = cvRef.current;
+    const source = sourceRef.current;
+    if (!cv || !source) return;
+
+    const out = document.createElement("canvas");
+    runFilter(cv, scaleCanvas(source, APPLY_MAX), out, mode, contrast, threshold);
+    out.toBlob((blob) => blob && onApply(blob), "image/jpeg", 0.95);
   }
 
   return (
